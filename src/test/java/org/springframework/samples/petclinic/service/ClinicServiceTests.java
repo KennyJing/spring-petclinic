@@ -20,10 +20,17 @@ import static org.assertj.core.api.Assertions.assertThat;
 
 import java.time.LocalDate;
 import java.util.Collection;
+import java.util.function.Consumer;
 
+import com.github.dockerjava.api.command.CreateContainerCmd;
+import com.github.dockerjava.api.model.ExposedPort;
+import com.github.dockerjava.api.model.PortBinding;
+import com.github.dockerjava.api.model.Ports;
+import org.junit.ClassRule;
 import org.junit.Test;
 import org.junit.runner.RunWith;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.boot.test.autoconfigure.jdbc.AutoConfigureTestDatabase;
 import org.springframework.boot.test.autoconfigure.orm.jpa.DataJpaTest;
 import org.springframework.context.annotation.ComponentScan;
 import org.springframework.samples.petclinic.owner.Owner;
@@ -36,8 +43,12 @@ import org.springframework.samples.petclinic.vet.VetRepository;
 import org.springframework.samples.petclinic.visit.Visit;
 import org.springframework.samples.petclinic.visit.VisitRepository;
 import org.springframework.stereotype.Service;
+import org.springframework.test.context.TestPropertySource;
 import org.springframework.test.context.junit4.SpringRunner;
 import org.springframework.transaction.annotation.Transactional;
+import org.testcontainers.containers.GenericContainer;
+import org.testcontainers.containers.wait.strategy.Wait;
+import org.testcontainers.images.builder.ImageFromDockerfile;
 
 /**
  * Integration test of the Service and the Repository layer.
@@ -62,7 +73,34 @@ import org.springframework.transaction.annotation.Transactional;
 
 @RunWith(SpringRunner.class)
 @DataJpaTest(includeFilters = @ComponentScan.Filter(Service.class))
+@TestPropertySource(locations="classpath:application-test.properties")
+@AutoConfigureTestDatabase(replace = AutoConfigureTestDatabase.Replace.NONE)
 public class ClinicServiceTests {
+
+    @ClassRule
+    public static GenericContainer mysql = new GenericContainer(new ImageFromDockerfile("mysql-petclinic")
+        .withDockerfileFromBuilder(dockerfileBuilder -> {
+            dockerfileBuilder.from("mysql:5.7.8")
+                .env("MYSQL_ROOT_PASSWORD", "root_password")
+                .env("MYSQL_DATABASE", "petclinic")
+                .env("MYSQL_USER", "petclinic")
+                .env("MYSQL_PASSWORD", "petclinic")
+                .add("a_schema.sql", "/docker-entrypoint-initdb.d")
+                .add("b_data.sql", "/docker-entrypoint-initdb.d");
+        })
+        .withFileFromClasspath("a_schema.sql", "db/mysql/schema.sql")
+        .withFileFromClasspath("b_data.sql", "db/mysql/data.sql"))
+        .withExposedPorts(3306)
+        .withCreateContainerCmdModifier(
+            new Consumer<CreateContainerCmd>() {
+                @Override
+                public void accept(CreateContainerCmd createContainerCmd) {
+                    createContainerCmd.withPortBindings(new PortBinding(Ports.Binding.bindPort(3306), new ExposedPort(3306)));
+                }
+            }
+        )
+        .waitingFor(Wait.forListeningPort());
+
 
     @Autowired
     protected OwnerRepository owners;
